@@ -8,11 +8,11 @@ set_all_seeds(42)
 
 device = 'cuda:2'
 num_features = 600
-training_steps = 150
+training_steps = 15000
 objective = 'pred_x0'
 mode = 'inpaint' # 'train' or 'reconstruct' or 'inpaint'
 inpainting_strategy = 't-noised-replace' # 't-noised-replace' or 'original-replace' or 't-noised-replace'
-dataset_name = 'dota2' # 'dota2' or 'dblp'
+dataset_name = 'dblp' # 'dota2' or 'dblp'
 
 model = Unet1D(
     dim = 64,
