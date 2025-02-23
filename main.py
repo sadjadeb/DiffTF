@@ -9,8 +9,8 @@ set_all_seeds(42)
 device = 'cuda:2'
 num_features = 600
 training_steps = 15000
-objective = 'pred_x0'
-mode = 'inpaint' # 'train' or 'reconstruct' or 'inpaint'
+objective = 'pred_noise'
+mode = 'train' # 'train' or 'reconstruct' or 'inpaint'
 inpainting_strategy = 't-noised-replace' # 't-noised-replace' or 'original-replace' or 't-noised-replace'
 dataset_name = 'dblp' # 'dota2' or 'dblp'
 
@@ -70,6 +70,16 @@ all_seq = preprocess_tensor(all_tensor)
 print("Train Seq Shape:", train_seq.shape)
 print("Test Seq Shape:", test_seq.shape)
 print("All Seq Shape:", all_seq.shape)
+
+
+def reorder_list(reference_list, target_list):
+    # Create a dictionary from the target list for quick lookup
+    target_dict = {item[0]: item for item in target_list}
+    
+    # Reorder the target list based on the reference list's order
+    ordered_target_list = [target_dict[item[0]] for item in reference_list if item[0] in target_dict]
+    
+    return ordered_target_list
 
 
 if mode == 'train':
@@ -165,8 +175,12 @@ elif mode == 'inpaint':
             denoised_records.append((original_index, denoised_all_seq[i][:300], denoised_all_seq[i][300:]))
         except:
             # as we truncated the last records to fit the channel size, we may have less records than the original
-            pass
+            # in this case, we put full zeros for the missing records
+            denoised_records.append((original_index, [0]*300, [0]*300))
         
+    # sort the records based on the original order
+    denoised_records = reorder_list(records, denoised_records)
+    
     print("Denoised Records Length:", len(denoised_records))
 
     with open(f'output/inpainted_{dataset_name}_model-steps-{training_steps}_obj-{objective}.pkl', 'wb') as f:
