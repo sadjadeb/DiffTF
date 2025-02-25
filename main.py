@@ -57,17 +57,26 @@ if dataset_name == 'dota2':
     test_ids = [i for i in test_ids if i < 141]
 
 # Construct tensors for train and test sets
-train_tensor = torch.stack([records_dict[i] for i in train_ids])
+train_val_tensor = torch.stack([records_dict[i] for i in train_ids])
 test_tensor = torch.stack([records_dict[i] for i in test_ids])
 all_tensor = torch.stack([records_dict[i] for i in train_ids + test_ids])
+
+# Define the split ratio (e.g., 80% train, 20% validation)
+train_size = int(0.8 * len(train_val_tensor))  # 80% of the dataset
+train_tensor = train_val_tensor[:train_size]
+val_tensor = train_val_tensor[train_size:]
+
 print("Train Tensor Shape:", train_tensor.shape)
+print("Validation Tensor Shape:", val_tensor.shape)
 print("Test Tensor Shape:", test_tensor.shape)
 print("All Tensor Shape:", all_tensor.shape)
 
 train_seq = preprocess_tensor(train_tensor)
+val_seq = preprocess_tensor(val_tensor)
 test_seq = preprocess_tensor(test_tensor)
 all_seq = preprocess_tensor(all_tensor)
 print("Train Seq Shape:", train_seq.shape)
+print("Validation Seq Shape:", val_seq.shape)
 print("Test Seq Shape:", test_seq.shape)
 print("All Seq Shape:", all_seq.shape)
 
@@ -83,7 +92,7 @@ def reorder_list(reference_list, target_list):
 
 
 if mode == 'train':
-    wandb.init(project='ddpm_pt', name=f'ddpm_1d_{dataset_name}_{training_steps}_{objective}')
+    wandb.init(project='ddpm_pt_TF', name=f'ddpm_{dataset_name}_{training_steps}_{objective}')
     
     wandb.config.update({
         'training_steps': training_steps,
@@ -91,28 +100,31 @@ if mode == 'train':
         'mode': mode,
     })
 
-    # Or using trainer
-    dataset = Dataset1D(train_seq) 
+    train_dataset = Dataset1D(train_seq)
+    val_dataset = Dataset1D(val_seq)
     
     trainer = Trainer1D(
         diffusion,
-        dataset = dataset,
+        train_dataset=train_dataset,
+        val_dataset=val_dataset,
         train_batch_size = 32,
         train_lr = 8e-5,
         train_num_steps = training_steps, # total training steps
         gradient_accumulate_every = 2,    # gradient accumulation steps
         ema_decay = 0.995,                # exponential moving average decay
-        save_and_sample_every = 10000,    # save model and sample every n steps
-        results_folder='checkpoints',
+        eval_every = 50,    # save model and sample every n steps
     )
-    trainer.train()
+    
+    best_model, final_model = trainer.train()
+    
+    torch.save(best_model.model.state_dict(), f'checkpoints/ddpm_{dataset_name}_{training_steps}_{objective}_best.pt')
+    torch.save(final_model.model.state_dict(), f'checkpoints/ddpm_{dataset_name}_{training_steps}_{objective}_final.pt')
     
     wandb.finish()
-    torch.save(diffusion.model.state_dict(), f'checkpoints/ddpm_{dataset_name}_{training_steps}_{objective}.pt')
     
 elif mode == 'reconstruct':
     # load the trained model
-    diffusion.model.load_state_dict(torch.load(f'checkpoints/ddpm_{dataset_name}_{training_steps}_{objective}.pt'))
+    diffusion.model.load_state_dict(torch.load(f'checkpoints/ddpm_{dataset_name}_{training_steps}_{objective}_best.pt'))
     
     # add noise to the sequence
     b = all_seq.shape[0]
@@ -142,7 +154,7 @@ elif mode == 'reconstruct':
 
 elif mode == 'inpaint':
     # load the trained model
-    diffusion.model.load_state_dict(torch.load(f'checkpoints/ddpm_{dataset_name}_{training_steps}_{objective}.pt'))
+    diffusion.model.load_state_dict(torch.load(f'checkpoints/ddpm_{dataset_name}_{training_steps}_{objective}_best.pt'))
     
     # replace the second half of the sequence with zeros
     masked_all_seq = all_seq.clone()

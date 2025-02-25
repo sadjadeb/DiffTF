@@ -3,7 +3,7 @@ from pathlib import Path
 from random import random
 from functools import partial
 from collections import namedtuple
-
+from copy import deepcopy
 import torch
 from torch import nn, einsum, Tensor
 from torch.nn import Module, ModuleList
@@ -792,7 +792,8 @@ class Trainer1D(object):
     def __init__(
         self,
         diffusion_model: GaussianDiffusion1D,
-        dataset: Dataset,
+        train_dataset: Dataset,
+        val_dataset: Dataset,
         *,
         train_batch_size = 16,
         gradient_accumulate_every = 1,
@@ -801,9 +802,7 @@ class Trainer1D(object):
         ema_update_every = 10,
         ema_decay = 0.995,
         adam_betas = (0.9, 0.99),
-        save_and_sample_every = 1000,
-        num_samples = 25,
-        results_folder = './results',
+        eval_every = 100,
         max_grad_norm = 1.
     ):
         super().__init__()
@@ -815,10 +814,7 @@ class Trainer1D(object):
         self.device = diffusion_model.betas.device
 
         # sampling and training hyperparameters
-
-        assert has_int_squareroot(num_samples), 'number of samples must have an integer square root'
-        self.num_samples = num_samples
-        self.save_and_sample_every = save_and_sample_every
+        self.eval_every = eval_every
 
         self.batch_size = train_batch_size
         self.gradient_accumulate_every = gradient_accumulate_every
@@ -827,59 +823,34 @@ class Trainer1D(object):
         self.train_num_steps = train_num_steps
 
         # dataset and dataloader
-        dl = DataLoader(dataset, batch_size = train_batch_size, shuffle = True)
+        train_dl = DataLoader(train_dataset, batch_size = train_batch_size, shuffle = True)
+        val_dl = DataLoader(val_dataset, batch_size = train_batch_size, shuffle = False)
 
-        self.dl = cycle(dl)
+        self.train_dl = cycle(train_dl)
+        self.val_dl = val_dl
         
 
         # optimizer
         self.opt = Adam(diffusion_model.parameters(), lr = train_lr, betas = adam_betas)
 
         # for logging results in a folder periodically
-
         self.ema = EMA(diffusion_model, beta = ema_decay, update_every = ema_update_every)
         self.ema.to(self.device)
 
-        self.results_folder = Path(results_folder)
-        self.results_folder.mkdir(exist_ok = True)
-
         # step counter state
-
         self.step = 0
-
-    def save(self, milestone):
-        data = {
-            'step': self.step,
-            'model': self.model.state_dict(),
-            'opt': self.opt.state_dict(),
-            'ema': self.ema.state_dict(),
-            'scaler': None,
-        }
-
-        torch.save(data, str(self.results_folder / f'model-{milestone}.pt'))
-
-    def load(self, milestone):
-        data = torch.load(str(self.results_folder / f'model-{milestone}.pt'), map_location=self.device, weights_only=True)
-
-        model = self.model
-        model.load_state_dict(data['model'])
-
-        self.step = data['step']
-        self.opt.load_state_dict(data['opt'])
-        self.ema.load_state_dict(data["ema"])
-
-        if 'version' in data:
-            print(f"loading from version {data['version']}")
 
 
     def train(self):
+        best_val_loss = float('inf')
+        best_model = None
         with tqdm(initial = self.step, total = self.train_num_steps) as pbar:
             while self.step < self.train_num_steps:
                 self.model.train()
 
                 total_loss = 0.
                 for _ in range(self.gradient_accumulate_every):
-                    data = next(self.dl).to(self.device)
+                    data = next(self.train_dl).to(self.device)
 
                     loss = self.model(data)
                     loss = loss / self.gradient_accumulate_every
@@ -887,7 +858,6 @@ class Trainer1D(object):
 
                     loss.backward()
 
-                wandb.log({'train_loss': total_loss})
                 pbar.set_description(f'loss: {total_loss:.4f}')
 
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
@@ -897,19 +867,25 @@ class Trainer1D(object):
                 self.step += 1
                 self.ema.update()
 
-                if self.step != 0 and self.step % self.save_and_sample_every == 0:
-                    self.ema.ema_model.eval()
-
-                    with torch.no_grad():
-                        milestone = self.step // self.save_and_sample_every
-                        batches = num_to_groups(self.num_samples, self.batch_size)
-                        all_samples_list = list(map(lambda n: self.ema.ema_model.sample(batch_size=n), batches))
-
-                    all_samples = torch.cat(all_samples_list, dim = 0)
-
-                    torch.save(all_samples, str(self.results_folder / f'sample-{milestone}.png'))
-                    self.save(milestone)
+                if self.step != 0 and self.step % self.eval_every == 0:
+                    self.model.eval()
+                    
+                    val_loss = 0.
+                    for data in self.val_dl:
+                        data = data.to(self.device)
+                        loss = self.model(data)
+                        val_loss += loss.item()
+                        
+                    val_loss /= len(self.val_dl)
+                        
+                    wandb.log({'train_loss': total_loss, 'val_loss': val_loss})
+                    
+                    if val_loss < best_val_loss:
+                        best_val_loss = val_loss
+                        best_model = deepcopy(self.model)
 
                 pbar.update(1)
 
         print('training complete')
+        
+        return best_model, self.model
