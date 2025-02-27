@@ -15,7 +15,7 @@ inpainting_strategy = 't-noised-replace' # 't-noised-replace' or 'original-repla
 dataset_name = 'dblp' # 'dota2' or 'dblp'
 
 model = Unet1D(
-    dim = 64,
+    dim = 256,
     dim_mults = (1, 2, 4, 8),
     channels = 32
 )
