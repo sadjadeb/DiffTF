@@ -82,10 +82,12 @@ print("Validation Tensor Shape:", val_tensor.shape)
 print("Test Tensor Shape:", test_tensor.shape)
 print("All Tensor Shape:", all_tensor.shape)
 
-train_seq = preprocess_tensor(train_tensor)
-val_seq = preprocess_tensor(val_tensor)
-test_seq = preprocess_tensor(test_tensor)
-all_seq = preprocess_tensor(all_tensor)
+num_target_channels = 32 if args.dataset_name == 'dblp' else 2
+
+train_seq = preprocess_tensor(train_tensor, target_channels=num_target_channels)
+val_seq = preprocess_tensor(val_tensor, target_channels=num_target_channels)
+test_seq = preprocess_tensor(test_tensor, target_channels=num_target_channels)
+all_seq = preprocess_tensor(all_tensor, target_channels=num_target_channels)
 print("Train Seq Shape:", train_seq.shape)
 print("Validation Seq Shape:", val_seq.shape)
 print("Test Seq Shape:", test_seq.shape)
