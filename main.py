@@ -3,34 +3,45 @@ from denoising_diffusion_pytorch import Unet1D, GaussianDiffusion1D, Trainer1D, 
 import wandb
 import pickle
 from utils import set_all_seeds, preprocess_tensor
+import argparse
 
 set_all_seeds(42)
 
-device = 'cuda:2'
-num_features = 600
-training_steps = 15000
-objective = 'pred_noise'
-mode = 'train' # 'train' or 'reconstruct' or 'inpaint'
-inpainting_strategy = 't-noised-replace' # 't-noised-replace' or 'original-replace' or 't-noised-replace'
-dataset_name = 'dblp' # 'dota2' or 'dblp'
+
+parser = argparse.ArgumentParser(description='Diffusion Model Training and Inference')
+parser.add_argument('--device', type=str, default='cuda:0', help='Device to use for computation')
+parser.add_argument('--dataset_name', type=str, default='dblp', help='Name of the dataset', choices=['dota2', 'dblp'])
+parser.add_argument('--task', type=str, default='train', help='Task to perform: train, reconstruct, inpaint', choices=['train', 'reconstruct', 'inpaint'])
+parser.add_argument('--training_steps', type=int, default=45000, help='Number of training steps')
+parser.add_argument('--train_objective', type=str, default='pred_noise', help='Objective for training the diffusion model', choices=['pred_noise', 'pred_x0'])
+parser.add_argument('--model_hidden_dim', type=int, default=256, help='Dimension of the model')
+parser.add_argument('--inpainting_strategy', type=str, default='t-noised-replace', help='Inpainting strategy', choices=['t-noised-replace', 'original-replace', 't-noised-replace'])
+parser.add_argument('--trained_model', type=str, default=None, help='Path to a pre-trained model for inference')
+
+args = parser.parse_args()
+
+if args.task == 'inpaint' or args.task == 'reconstruct':
+    assert args.trained_model is not None, "Please provide the path to the trained model"
+
+device = args.device
 
 model = Unet1D(
-    dim = 256,
+    dim = args.model_hidden_dim,
     dim_mults = (1, 2, 4, 8),
-    channels = 32
+    channels = 32 if args.dataset_name == 'dblp' else 2,
 )
 
 diffusion = GaussianDiffusion1D(
     model,
-    seq_length = num_features,
-    objective = objective,
+    seq_length = 600, # Being hardcoded as the output of the T2V model is 600
+    objective = args.train_objective,
     auto_normalize = False
 ).to(device)
 
-if dataset_name == 'dota2':
+if args.dataset_name == 'dota2':
     records_path = 'data/ae_t2v_dimSkill300_dimUser300_tFull_dota2.pkl'
     indices_path = 'data/dota2_train_test_indices.pkl'
-elif dataset_name == 'dblp':
+elif args.dataset_name == 'dblp':
     records_path = 'data/ae_t2v_dimSkill300_dimUser300_tFull_dataset_V2.2.pkl'
     indices_path = 'data/Train_Test_indices_V2.3.pkl'
 else:
@@ -51,7 +62,7 @@ fold = indices[1]
 train_ids = fold["Train"]
 test_ids = fold["Test"]
 
-if dataset_name == 'dota2':
+if args.dataset_name == 'dota2':
     # limit the indices in each fold to to 141
     train_ids = [i for i in train_ids if i < 141]
     test_ids = [i for i in test_ids if i < 141]
@@ -91,13 +102,14 @@ def reorder_list(reference_list, target_list):
     return ordered_target_list
 
 
-if mode == 'train':
-    wandb.init(project='ddpm_pt_TF', name=f'ddpm_{dataset_name}_{training_steps}_{objective}')
+if args.task == 'train':
+    wandb.init(project='ddpm_pt_TF', name=f'ddpm_{args.dataset_name}')
     
     wandb.config.update({
-        'training_steps': training_steps,
-        'objective': objective,
-        'mode': mode,
+        'training_steps': args.training_steps,
+        'train_objective': args.train_objective,
+        'model_hidden_dim': args.model_hidden_dim,
+        'dataset_name': args.dataset_name
     })
 
     train_dataset = Dataset1D(train_seq)
@@ -109,7 +121,7 @@ if mode == 'train':
         val_dataset=val_dataset,
         train_batch_size = 32,
         train_lr = 8e-5,
-        train_num_steps = training_steps, # total training steps
+        train_num_steps = args.training_steps, # total training steps
         gradient_accumulate_every = 2,    # gradient accumulation steps
         ema_decay = 0.995,                # exponential moving average decay
         eval_every = 50,    # save model and sample every n steps
@@ -117,14 +129,14 @@ if mode == 'train':
     
     best_model, final_model = trainer.train()
     
-    torch.save(best_model.model.state_dict(), f'checkpoints/ddpm_{dataset_name}_{training_steps}_{objective}_best.pt')
-    torch.save(final_model.model.state_dict(), f'checkpoints/ddpm_{dataset_name}_{training_steps}_{objective}_final.pt')
+    torch.save(best_model.model.state_dict(), f'checkpoints/ddpm_{args.dataset_name}_{args.training_steps}_{args.train_objective}_{args.model_hidden_dim}_best.pt')
+    torch.save(final_model.model.state_dict(), f'checkpoints/ddpm_{args.dataset_name}_{args.training_steps}_{args.train_objective}_{args.model_hidden_dim}_final.pt')
     
     wandb.finish()
     
-elif mode == 'reconstruct':
+elif args.task == 'reconstruct':
     # load the trained model
-    diffusion.model.load_state_dict(torch.load(f'checkpoints/ddpm_{dataset_name}_{training_steps}_{objective}_best.pt'))
+    diffusion.model.load_state_dict(torch.load(args.trained_model))
     
     # add noise to the sequence
     b = all_seq.shape[0]
@@ -149,12 +161,12 @@ elif mode == 'reconstruct':
         
     print("Denoised Records Length:", len(denoised_records))
 
-    with open(f'output/reconstructed_{dataset_name}_model-steps-{training_steps}_obj-{objective}.pkl', 'wb') as f:
+    with open(f'output/reconstructed_{args.trained_model.split("/")[-1].replace(".pt", "")}.pkl', 'wb') as f:
         pickle.dump(denoised_records, f)
 
-elif mode == 'inpaint':
+elif args.task == 'inpaint':
     # load the trained model
-    diffusion.model.load_state_dict(torch.load(f'checkpoints/ddpm_{dataset_name}_{training_steps}_{objective}_best.pt'))
+    diffusion.model.load_state_dict(torch.load(args.trained_model))
     
     # replace the second half of the sequence with zeros
     masked_all_seq = all_seq.clone()
@@ -169,7 +181,7 @@ elif mode == 'inpaint':
     
     # reconstruct the masked sequence
     all_seq = all_seq.to(device)
-    denoised_all_seq = diffusion.inpaint(noisy_all_seq, all_seq, noise, strategy=inpainting_strategy)
+    denoised_all_seq = diffusion.inpaint(noisy_all_seq, all_seq, noise, strategy=args.inpainting_strategy)
     denoised_all_seq = denoised_all_seq.detach().cpu()
     all_seq = all_seq.detach().cpu()
     
@@ -195,5 +207,5 @@ elif mode == 'inpaint':
     
     print("Denoised Records Length:", len(denoised_records))
 
-    with open(f'output/inpainted_{dataset_name}_model-steps-{training_steps}_obj-{objective}.pkl', 'wb') as f:
+    with open(f'output/inpainted_{args.trained_model.split("/")[-1].replace(".pt", "")}.pkl', 'wb') as f:
         pickle.dump(denoised_records, f)
