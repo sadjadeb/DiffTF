@@ -24,11 +24,12 @@ if args.task == 'inpaint' or args.task == 'reconstruct':
     assert args.trained_model is not None, "Please provide the path to the trained model"
 
 device = args.device
+num_target_channels = 8 if args.dataset_name == 'dblp' else 2
 
 model = Unet1D(
     dim = args.model_hidden_dim,
     dim_mults = (1, 2, 4, 8),
-    channels = 32 if args.dataset_name == 'dblp' else 2,
+    channels = num_target_channels,
 )
 
 diffusion = GaussianDiffusion1D(
@@ -81,8 +82,6 @@ print("Train Tensor Shape:", train_tensor.shape)
 print("Validation Tensor Shape:", val_tensor.shape)
 print("Test Tensor Shape:", test_tensor.shape)
 print("All Tensor Shape:", all_tensor.shape)
-
-num_target_channels = 32 if args.dataset_name == 'dblp' else 2
 
 train_seq = preprocess_tensor(train_tensor, target_channels=num_target_channels)
 val_seq = preprocess_tensor(val_tensor, target_channels=num_target_channels)
