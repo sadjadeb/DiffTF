@@ -12,6 +12,7 @@ from torch.amp import autocast
 from torch.optim import Adam
 from torch.utils.data import Dataset, DataLoader
 import wandb
+from accelerate import Accelerator
 
 from einops import rearrange, reduce
 
@@ -637,10 +638,6 @@ class GaussianDiffusion1D(Module):
             self_cond = x_start if self.self_condition else None
             denoised_seq, x_start = self.p_sample(denoised_seq, t, self_cond)
             
-            # replace the first half of the sequence with the original sequence
-            # if t != 0:
-            #     denoised_seq[:, :, :300] = original_seq[:, :, :300]
-            
             if t != 0:
                 if strategy == 't-noised-replace':
                     t_batched = torch.full((original_seq.shape[0],), t, device=device)
@@ -652,6 +649,46 @@ class GaussianDiffusion1D(Module):
         denoised_seq = self.unnormalize(denoised_seq)
         
         return denoised_seq
+    
+        
+    @torch.no_grad()
+    def inpaint_distributed(self, noisy_seq, original_seq, noise, strategy, batch_size=32):
+        device = self.betas.device
+        num_samples = noisy_seq.size(0)
+
+        # Prepare the output container
+        denoised_all = []
+
+        for start_idx in tqdm(range(0, num_samples, batch_size), desc="Batch inpainting"):
+            end_idx = min(start_idx + batch_size, num_samples)
+
+            # Slice batch
+            noisy_batch = noisy_seq[start_idx:end_idx].to(device)
+            original_batch = original_seq[start_idx:end_idx].to(device)
+            noise_batch = noise[start_idx:end_idx].to(device)
+
+            denoised_batch = noisy_batch.clone()
+            x_start = None
+
+            for t in reversed(range(self.num_timesteps)):
+                self_cond = x_start if self.self_condition else None
+                denoised_batch, x_start = self.p_sample(denoised_batch, t, self_cond)
+
+                if t != 0:
+                    if strategy == 't-noised-replace':
+                        t_batched = torch.full((original_batch.shape[0],), t, device=device)
+                        t_noised = self.q_sample(original_batch, t_batched, noise_batch)
+                        denoised_batch[:, :, :300] = t_noised[:, :, :300]
+                    elif strategy == 'original-replace':
+                        denoised_batch[:, :, :300] = original_batch[:, :, :300]
+
+            denoised_batch = self.unnormalize(denoised_batch)
+
+            denoised_batch = self.unnormalize(denoised_batch)
+            denoised_all.append(denoised_batch.cpu())
+
+        # Concatenate all batch results
+        return torch.cat(denoised_all, dim=0)
     
     
     @torch.no_grad()
@@ -810,8 +847,6 @@ class Trainer1D(object):
 
         # model
         self.model = diffusion_model
-        self.channels = diffusion_model.channels
-        self.device = diffusion_model.betas.device
 
         # sampling and training hyperparameters
         self.eval_every = eval_every
@@ -835,15 +870,19 @@ class Trainer1D(object):
 
         # for logging results in a folder periodically
         self.ema = EMA(diffusion_model, beta = ema_decay, update_every = ema_update_every)
-        self.ema.to(self.device)
 
         # step counter state
         self.step = 0
 
 
     def train(self):
+        print('start training in single gpu mode')
+        self.device = self.model.betas.device
+        self.ema.to(self.device)
+        
         best_val_loss = float('inf')
         best_model = None
+        
         with tqdm(initial = self.step, total = self.train_num_steps) as pbar:
             while self.step < self.train_num_steps:
                 self.model.train()
@@ -889,3 +928,65 @@ class Trainer1D(object):
         print('training complete')
         
         return best_model, self.model
+
+    def train_distributed(self, accelerator):
+        print('start training in distributed mode')
+                
+        # Prepare components for distributed training
+        print('Preparing model, optimizer, and dataloaders for distributed training...')
+        self.model, self.opt, self.train_dl, self.val_dl = accelerator.prepare(
+            self.model, self.opt, self.train_dl, self.val_dl
+        )
+
+        best_val_loss = float('inf')
+        best_model = None
+        
+        with tqdm(initial=self.step, total=self.train_num_steps, disable=not accelerator.is_main_process) as pbar:
+            while self.step < self.train_num_steps:
+                self.model.train()
+
+                total_loss = 0.
+                for _ in range(self.gradient_accumulate_every):
+                    data = next(self.train_dl)
+                    with accelerator.accumulate(self.model):
+                        data = data.to(accelerator.device)
+                        loss = self.model(data)
+                        loss = loss / self.gradient_accumulate_every
+                        accelerator.backward(loss)
+                        total_loss += loss.item()
+
+                if self.max_grad_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
+                
+
+                self.opt.step()
+                self.opt.zero_grad()
+                self.step += 1
+
+                if accelerator.is_main_process:    
+                    pbar.set_description(f'loss: {total_loss:.4f}')
+                    pbar.update(1)
+                    
+                    wandb.log({'train_loss': total_loss})
+                    
+                    # if self.step != 0 and self.step % self.eval_every == 0:
+                    #     accelerator.wait_for_everyone()
+                    #     self.model.eval()
+                        
+                    #     val_loss = 0.
+                    #     for data in self.val_dl:
+                    #         loss = self.model(data)
+                    #         val_loss += loss.item()
+                            
+                    #     val_loss = accelerator.gather(torch.tensor(val_loss)).mean().item()
+                    #     val_loss /= len(self.val_dl)
+                        
+                    #     # wandb.log({'train_loss': total_loss, 'val_loss': val_loss})
+                    #     print(f'train_loss: {total_loss}, val_loss: {val_loss}')
+                        
+                    #     if val_loss < best_val_loss:
+                    #         best_val_loss = val_loss
+                    #         print('previously did deepcopy')
+                    #         # best_model = deepcopy(self.model).cpu()
+
+        return self.model

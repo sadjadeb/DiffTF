@@ -17,6 +17,7 @@ parser.add_argument('--train_objective', type=str, default='pred_noise', help='O
 parser.add_argument('--model_hidden_dim', type=int, default=256, help='Dimension of the model')
 parser.add_argument('--inpainting_strategy', type=str, default='t-noised-replace', help='Inpainting strategy', choices=['t-noised-replace', 'original-replace', 't-noised-replace'])
 parser.add_argument('--trained_model', type=str, default=None, help='Path to a pre-trained model for inference')
+parser.add_argument('--multi_gpu', action='store_true', help='Use multiple GPUs for training')
 
 args = parser.parse_args()
 
@@ -37,7 +38,7 @@ diffusion = GaussianDiffusion1D(
     seq_length = 600, # Being hardcoded as the output of the T2V model is 600
     objective = args.train_objective,
     auto_normalize = False
-).to(device)
+)
 
 if args.dataset_name == 'dota2':
     records_path = 'data/ae_t2v_dimSkill300_dimUser300_tFull_dota2.pkl'
@@ -104,7 +105,7 @@ def reorder_list(reference_list, target_list):
 
 
 if args.task == 'train':
-    wandb.init(project='ddpm_pt_TF', name=f'ddpm_{args.dataset_name}')
+    wandb.init(project='ddpm_pt_TF', name=f'ddpm_{args.dataset_name}_multigpu' if args.multi_gpu else f'ddpm_{args.dataset_name}')
     
     wandb.config.update({
         'training_steps': args.training_steps,
@@ -128,10 +129,19 @@ if args.task == 'train':
         eval_every = 50,    # save model and sample every n steps
     )
     
-    best_model, final_model = trainer.train()
+    if args.multi_gpu:
+        from accelerate import Accelerator
+        accelerator = Accelerator()
+        
+        final_model = trainer.train_distributed(accelerator)
+        
+        accelerator.save_state(f'checkpoints/ddpm_{args.dataset_name}_{args.training_steps}_{args.train_objective}_{args.model_hidden_dim}_multigpu')
+    else:
+        diffusion.to(device)
+        best_model, final_model = trainer.train()
     
-    torch.save(best_model.model.state_dict(), f'checkpoints/ddpm_{args.dataset_name}_{args.training_steps}_{args.train_objective}_{args.model_hidden_dim}_best.pt')
-    torch.save(final_model.model.state_dict(), f'checkpoints/ddpm_{args.dataset_name}_{args.training_steps}_{args.train_objective}_{args.model_hidden_dim}_final.pt')
+        torch.save(best_model.model.state_dict(), f'checkpoints/ddpm_{args.dataset_name}_{args.training_steps}_{args.train_objective}_{args.model_hidden_dim}_best.pt')
+        torch.save(final_model.model.state_dict(), f'checkpoints/ddpm_{args.dataset_name}_{args.training_steps}_{args.train_objective}_{args.model_hidden_dim}_final.pt')
     
     wandb.finish()
     
@@ -167,7 +177,24 @@ elif args.task == 'reconstruct':
 
 elif args.task == 'inpaint':
     # load the trained model
-    diffusion.model.load_state_dict(torch.load(args.trained_model))
+    if args.multi_gpu:
+        from accelerate import Accelerator, load_checkpoint_in_model
+        from deepspeed.utils.zero_to_fp32 import get_fp32_state_dict_from_zero_checkpoint
+        accelerator = Accelerator()
+        
+        # do the training and checkpoint saving
+        state_dict = get_fp32_state_dict_from_zero_checkpoint(args.trained_model) # already on cpu
+        diffusion = diffusion.cpu() # move to cpu
+        diffusion.load_state_dict(state_dict)
+        
+        # load the model
+        # load_checkpoint_in_model(diffusion, args.trained_model)        
+        
+        device = accelerator.device
+    else:
+        diffusion.model.load_state_dict(torch.load(args.trained_model))
+    
+    diffusion.to(device)
     
     # replace the second half of the sequence with zeros
     masked_all_seq = all_seq.clone()
@@ -182,7 +209,10 @@ elif args.task == 'inpaint':
     
     # reconstruct the masked sequence
     all_seq = all_seq.to(device)
-    denoised_all_seq = diffusion.inpaint(noisy_all_seq, all_seq, noise, strategy=args.inpainting_strategy)
+    if args.multi_gpu:
+        denoised_all_seq = diffusion.inpaint_distributed(noisy_all_seq, all_seq, noise, strategy=args.inpainting_strategy, batch_size=8)
+    else:
+        denoised_all_seq = diffusion.inpaint(noisy_all_seq, all_seq, noise, strategy=args.inpainting_strategy)
     denoised_all_seq = denoised_all_seq.detach().cpu()
     all_seq = all_seq.detach().cpu()
     
@@ -207,6 +237,11 @@ elif args.task == 'inpaint':
     denoised_records = reorder_list(records, denoised_records)
     
     print("Denoised Records Length:", len(denoised_records))
+    
+    # remove the last '/' from the trained model path
+    if args.multi_gpu:
+        args.trained_model = args.trained_model[:-1] if args.trained_model[-1] == '/' else args.trained_model
 
+    # Save the denoised sequence like the input pickle file
     with open(f'output/inpainted_{args.trained_model.split("/")[-1].replace(".pt", "")}.pkl', 'wb') as f:
         pickle.dump(denoised_records, f)
