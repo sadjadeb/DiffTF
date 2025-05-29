@@ -1,0 +1,8 @@
+output/
+data/
+checkpoints/
+
+__pycache__/
+wandb/
+
+slurm-*
