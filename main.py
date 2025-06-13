@@ -11,7 +11,7 @@ set_all_seeds(42)
 parser = argparse.ArgumentParser(description='Diffusion Model Training and Inference')
 parser.add_argument('--device', type=str, default='cuda:0', help='Device to use for computation')
 parser.add_argument('--dataset_name', type=str, default='dblp', help='Name of the dataset', choices=['dota2', 'dblp'])
-parser.add_argument('--task', type=str, default='train', help='Task to perform: train, reconstruct, inpaint', choices=['train', 'reconstruct', 'inpaint'])
+parser.add_argument('--task', type=str, default='train', help='Task to perform: train or inpaint', choices=['train', 'inpaint'])
 parser.add_argument('--training_steps', type=int, default=45000, help='Number of training steps')
 parser.add_argument('--train_objective', type=str, default='pred_noise', help='Objective for training the diffusion model', choices=['pred_noise', 'pred_x0'])
 parser.add_argument('--model_hidden_dim', type=int, default=256, help='Dimension of the model')
@@ -144,36 +144,6 @@ if args.task == 'train':
         torch.save(final_model.model.state_dict(), f'checkpoints/ddpm_{args.dataset_name}_{args.training_steps}_{args.train_objective}_{args.model_hidden_dim}_final.pt')
     
     wandb.finish()
-    
-elif args.task == 'reconstruct':
-    # load the trained model
-    diffusion.model.load_state_dict(torch.load(args.trained_model))
-    
-    # add noise to the sequence
-    b = all_seq.shape[0]
-    t = torch.full((b,), diffusion.num_timesteps - 1, device=device)
-    noise = torch.randn_like(all_seq, device=device)
-    noisy_all_seq = diffusion.q_sample(x_start=all_seq.to(device), t=t, noise=noise)
-    
-    denoised_all_seq = diffusion.denoise(noisy_all_seq)
-    denoised_all_seq = denoised_all_seq.detach().cpu()
-    
-    # calculate the MSE between the denoised sequence and the original sequence
-    mse = torch.nn.functional.mse_loss(denoised_all_seq, all_seq).item()
-    print(f'MSE: {mse}')
-    
-    # reshape the denoised sequence to (n_samples, 600)
-    denoised_all_seq = denoised_all_seq.numpy().reshape(-1, 600)
-    
-    # Save the denoised sequence like the input pickle file
-    denoised_records = []
-    for i, original_index in enumerate((train_ids + test_ids)[:len(denoised_all_seq)]):
-        denoised_records.append((original_index, denoised_all_seq[i][:300], denoised_all_seq[i][300:]))
-        
-    print("Denoised Records Length:", len(denoised_records))
-
-    with open(f'output/reconstructed_{args.trained_model.split("/")[-1].replace(".pt", "")}.pkl', 'wb') as f:
-        pickle.dump(denoised_records, f)
 
 elif args.task == 'inpaint':
     # load the trained model
@@ -243,5 +213,5 @@ elif args.task == 'inpaint':
         args.trained_model = args.trained_model[:-1] if args.trained_model[-1] == '/' else args.trained_model
 
     # Save the denoised sequence like the input pickle file
-    with open(f'output/inpainted_{args.trained_model.split("/")[-1].replace(".pt", "")}.pkl', 'wb') as f:
+    with open(f'diffusion_outputs/inpainted_{args.trained_model.split("/")[-1].replace(".pt", "")}.pkl', 'wb') as f:
         pickle.dump(denoised_records, f)
