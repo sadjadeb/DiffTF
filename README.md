@@ -47,19 +47,18 @@ We use two benchmark datasets for evaluation:
 * **DBLP**: A bibliographic dataset where authors form teams for publications, and skills are extracted from paper titles.
 * **DOTA2**: A dataset from the popular video game, where teams of players (experts) are formed for matches, and skills are derived from in-game features.
 
-To download the datasets, you can use the following commands:
-
-```bash
-gdown --folder <url_to_gdrive_folder>
-```
-The datasets will be saved in the `data/` directory. The expected structure is as follows:
+The pre-processed data and scripts to prepare it can be found in the `/data` directory of the repository. The dataset files are structured as follows:
 
 ```
-data/
-├── ae_t2v_dimSkill300_dimUser300_tFull_dataset_V2.2.pkl
-├── ae_t2v_dimSkill300_dimUser300_tFull_dota2.pkl
-├── dota2_train_test_indices.pkl
-├── Train_Test_indices_V2.3.pkl
+dataset/
+├── dblp/
+   ├── ae_t2v_dimSkill300_dimUser300_tFull_dataset_V2.2.pkl
+   ├── dblp_preprocessed_dataset_V2.3.pkl
+   ├── Train_Test_indices_V2.3.pkl
+├── dota2/
+   ├── ae_t2v_dimSkill300_dimUser300_tFull_dota2.pkl
+   ├── dota2_dataset.pkl
+   ├── dota2_train_test_indices.pkl
 ```
 
 ### Environment Setup
