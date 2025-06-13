@@ -47,7 +47,7 @@ We use two benchmark datasets for evaluation:
 * **DBLP**: A bibliographic dataset where authors form teams for publications, and skills are extracted from paper titles.
 * **DOTA2**: A dataset from the popular video game, where teams of players (experts) are formed for matches, and skills are derived from in-game features.
 
-The pre-processed data and scripts to prepare it can be found in the `/data` directory of the repository. The dataset files are structured as follows:
+The pre-processed data and scripts to prepare it can be found in the `/dataset` directory of the repository. The dataset files are structured as follows:
 
 ```
 dataset/
