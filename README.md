@@ -5,6 +5,19 @@ This repository contains the official implementation for the paper: *Diffusion-B
 Our work introduces a novel generative approach for expert team formation using denoising diffusion probabilistic models (DDPMs). We frame team formation as a conditional inpainting task, where the model learns to generate a team of experts conditioned on a given set of skill requirements. This method effectively addresses challenges like data sparsity and generalization to new skill combinations.
 
 
+This README is structured to help you understand the proposed approach, how to run the code, and the key contributions of our work as follows:
+
+- [Proposed Approach](#proposed-approach)
+- [Running the Code](#running-the-code)
+  - [Data Preparation](#data-preparation)
+  - [Environment Setup](#environment-setup)
+  - [Training the Model](#training-the-model)
+  - [Forming Expert Teams](#forming-expert-teams)
+- [Key Contributions](#key-contributions)
+- [Results](#results)
+- [Abstract](#abstract)
+- [License](#license)
+
 ## Proposed Approach
 
 Our framework leverages a skill-conditioned diffusion model to generate expert teams. The core of our model is a U-Net architecture that learns to reverse a noise-corruption process.
