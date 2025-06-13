@@ -3,7 +3,7 @@ import numpy as np
 import eval.ranking as rk
 import ml_metrics as metrics
 import matplotlib.pyplot as plt
-import dal.load_dblp_data as dblp
+import eval.load_dblp_data as dblp
 import eval.evaluator as evaluator
 import argparse
 

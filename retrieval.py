@@ -9,7 +9,7 @@ import sys
 import random
 
 # Local imports
-import dal.load_dblp_data as dblp
+import eval.load_dblp_data as dblp
 import eval.evaluator_updated as evaluator
 import ml_metrics as metrics
 import eval.ranking as rk
