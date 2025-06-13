@@ -639,11 +639,11 @@ class GaussianDiffusion1D(Module):
             denoised_seq, x_start = self.p_sample(denoised_seq, t, self_cond)
             
             if t != 0:
-                if strategy == 't-noised-replace':
+                if strategy == 'x_t':
                     t_batched = torch.full((original_seq.shape[0],), t, device=device)
                     t_noised = self.q_sample(original_seq, t_batched, noise)
                     denoised_seq[:, :, :300] = t_noised[:, :, :300]
-                elif strategy == 'original-replace':
+                elif strategy == 'x_0':
                     denoised_seq[:, :, :300] = original_seq[:, :, :300]
         
         denoised_seq = self.unnormalize(denoised_seq)
@@ -675,11 +675,11 @@ class GaussianDiffusion1D(Module):
                 denoised_batch, x_start = self.p_sample(denoised_batch, t, self_cond)
 
                 if t != 0:
-                    if strategy == 't-noised-replace':
+                    if strategy == 'x_t':
                         t_batched = torch.full((original_batch.shape[0],), t, device=device)
                         t_noised = self.q_sample(original_batch, t_batched, noise_batch)
                         denoised_batch[:, :, :300] = t_noised[:, :, :300]
-                    elif strategy == 'original-replace':
+                    elif strategy == 'x_0':
                         denoised_batch[:, :, :300] = original_batch[:, :, :300]
 
             denoised_batch = self.unnormalize(denoised_batch)

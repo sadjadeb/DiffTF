@@ -15,13 +15,13 @@ parser.add_argument('--task', type=str, default='train', help='Task to perform: 
 parser.add_argument('--training_steps', type=int, default=45000, help='Number of training steps')
 parser.add_argument('--train_objective', type=str, default='pred_noise', help='Objective for training the diffusion model', choices=['pred_noise', 'pred_x0'])
 parser.add_argument('--model_hidden_dim', type=int, default=256, help='Dimension of the model')
-parser.add_argument('--inpainting_strategy', type=str, default='t-noised-replace', help='Inpainting strategy', choices=['t-noised-replace', 'original-replace', 't-noised-replace'])
+parser.add_argument('--inpainting_strategy', type=str, default='x_t', help='Inpainting strategy', choices=['x_t', 'x_0'])
 parser.add_argument('--trained_model', type=str, default=None, help='Path to a pre-trained model for inference')
 parser.add_argument('--multi_gpu', action='store_true', help='Use multiple GPUs for training')
 
 args = parser.parse_args()
 
-if args.task == 'inpaint' or args.task == 'reconstruct':
+if args.task == 'inpaint':
     assert args.trained_model is not None, "Please provide the path to the trained model"
 
 device = args.device
@@ -215,3 +215,6 @@ elif args.task == 'inpaint':
     # Save the denoised sequence like the input pickle file
     with open(f'diffusion_outputs/inpainted_{args.trained_model.split("/")[-1].replace(".pt", "")}.pkl', 'wb') as f:
         pickle.dump(denoised_records, f)
+
+else:
+    raise ValueError('Invalid task. Please choose either "train" or "inpaint".')
