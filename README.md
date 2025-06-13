@@ -52,13 +52,13 @@ The pre-processed data and scripts to prepare it can be found in the `/dataset` 
 ```
 dataset/
 ├── dblp/
-   ├── ae_t2v_dimSkill300_dimUser300_tFull_dataset_V2.2.pkl
-   ├── dblp_preprocessed_dataset_V2.3.pkl
-   ├── Train_Test_indices_V2.3.pkl
-├── dota2/
-   ├── ae_t2v_dimSkill300_dimUser300_tFull_dota2.pkl
-   ├── dota2_dataset.pkl
-   ├── dota2_train_test_indices.pkl
+│   ├── ae_t2v_dimSkill300_dimUser300_tFull_dataset_V2.2.pkl
+│   ├── dblp_preprocessed_dataset_V2.3.pkl
+│   └── Train_Test_indices_V2.3.pkl
+└── dota2/
+    ├── ae_t2v_dimSkill300_dimUser300_tFull_dota2.pkl
+    ├── dota2_dataset.pkl
+    └── dota2_train_test_indices.pkl
 ```
 
 ### Environment Setup
